@@ -22,11 +22,6 @@ interface FetchEvent extends Event {
   respondWith(response: Promise<Response> | Response): void;
 }
 
-const CLIENT_ID = Deno.env.get("CLIENT_ID");
-const CLIENT_PUBLIC_KEY = Deno.env.get("CLIENT_PUBLIC_KEY");
-
-console.log(CLIENT_ID);
-
 addEventListener("fetch", (evt: FetchEvent) => {
   const { request } = evt;
   try {
@@ -34,12 +29,15 @@ addEventListener("fetch", (evt: FetchEvent) => {
       return evt.respondWith(processDiscordInteractions(request));
     }
     return evt.respondWith(
-      json({ CLIENT_ID }, { status: 200, statusText: "OK" }),
+      json("Not found", { status: 404, statusText: "Not found." }),
     );
   } catch (error) {
     if (error instanceof Error) {
       evt.respondWith(
-        json({ message: error.message, name: error.name, stack: error.stack }),
+        json({ message: error.message, name: error.name, stack: error.stack }, {
+          status: 500,
+          statusText: "Internal server error.",
+        }),
       );
     }
   }

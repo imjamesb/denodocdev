@@ -1,10 +1,16 @@
+// Imports
+import nacl from "https://cdn.skypack.dev/tweetnacl@v1.0.3";
+import { CLIENT_PUBLIC_KEY } from "./config.ts";
+
 /**
  * Check whether or not a request was made by Discord Interactions.
  * @param request The request.
  */
 export function isRequestByDiscordInteractions(request: Request): boolean {
-  return request.headers.has("user-agent") &&
-    request.headers.get("user-agent")!.includes("Discord-Interactions");
+  return request.method === "POST" && request.headers.has("user-agent") &&
+    request.headers.get("user-agent")!.includes("Discord-Interactions") &&
+    request.headers.has("X-Signature-Ed25519") &&
+    request.headers.has("X-Signature-Timestamp");
 }
 
 export type JSONData =
@@ -34,31 +40,6 @@ export function json(data: JSONData, init?: ResponseInit): Response {
   });
 }
 
-export function readBody(
-  request: Request & { _body?: string; _promise?: Promise<null | string> },
-): Promise<string | null> {
-  if (!request.body) return Promise.resolve(null);
-  if (request._body) return Promise.resolve(request._body);
-  if (request._promise) return request._promise;
-  // deno-lint-ignore no-async-promise-executor
-  request._promise = new Promise<string>(async (resolve, reject) => {
-    try {
-      const reader = request.body!.getReader();
-      let str = "";
-      let _ = await reader.read();
-      while (!_.done) {
-        str = new TextDecoder().decode(_.value);
-        _ = await reader.read();
-      }
-      return resolve(request._body = str);
-    } catch (error) {
-      reject(error);
-      request._body = undefined;
-    }
-  });
-  return request._promise;
-}
-
 /**
  * Processes a request made by the Discord interactions user-agent.
  * @param request The request.
@@ -66,11 +47,48 @@ export function readBody(
 export async function processDiscordInteractions(
   request: Request,
 ): Promise<Response> {
-  console.log(
-    request.method,
-    request.url,
-    request.headers,
+  const { valid, body } = await verifySignature(request);
+
+  if (!valid) {
+    return json({ error: "Invalid request." }, { status: 401 });
+  }
+
+  const { type = 0, data = { options: [] } } = JSON.parse(body);
+
+  // Respond to ping interaction.
+  if (type === 1) {
+    return json({
+      type: 1,
+    });
+  }
+
+  // Bad request, nothing else to do.
+  return json({ error: "Bad request." }, { status: 400 });
+}
+
+/**
+ * Verify whether the request is coming from Discord.
+ * 
+ * Copied from [deno
+ * documentation](https://deno.com/deploy/docs/tutorial-discord-slash).
+ */
+async function verifySignature(
+  request: Request,
+): Promise<{ valid: boolean; body: string }> {
+  // Discord sends these headers with every request.
+  const signature = request.headers.get("X-Signature-Ed25519")!;
+  const timestamp = request.headers.get("X-Signature-Timestamp")!;
+  const body = await request.text();
+  const valid = nacl.sign.detached.verify(
+    new TextEncoder().encode(timestamp + body),
+    hexToUint8Array(signature),
+    hexToUint8Array(CLIENT_PUBLIC_KEY),
   );
-  console.log(await readBody(request));
-  return json("OK");
+
+  return { valid, body };
+}
+
+/** Converts a hexadecimal string to Uint8Array. */
+function hexToUint8Array(hex: string) {
+  return new Uint8Array(hex.match(/.{1,2}/g)!.map((val) => parseInt(val, 16)));
 }

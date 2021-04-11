@@ -57,6 +57,7 @@ export async function processDiscordInteractions(
 
   // Respond to ping interaction.
   if (type === 1) {
+    console.debug("Processing!");
     return json({
       type: 1,
     });
